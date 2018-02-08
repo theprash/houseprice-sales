@@ -24,6 +24,7 @@ type SearchableProperty =
       [<IsFacetable; IsFilterable; IsSearchable>] Town : string
       [<IsFacetable; IsFilterable; IsSearchable>] District : string
       [<IsFacetable; IsFilterable; IsSearchable>] County : string
+      [<IsFacetable; IsFilterable; IsSearchable>] PriceRange : string
       [<IsFilterable>] Geo : GeographyPoint }
 
 [<AutoOpen>]
@@ -61,7 +62,7 @@ module QueryBuilder =
 
     let doSearch config page searchText (parameters:SearchParameters) = task {
         let searchText = searchText |> Option.map(fun searchText -> searchText + "*") |> Option.defaultValue ""
-        parameters.Facets <- ResizeArray [ "Town"; "Locality"; "District"; "County"; "Price" ]
+        parameters.Facets <- ResizeArray [ "Town"; "Locality"; "District"; "County"; "PriceRange" ]
         parameters.Skip <- Nullable(page * 20)
         parameters.Top <- Nullable 20
         parameters.IncludeTotalResultCount <- true
@@ -72,7 +73,6 @@ module QueryBuilder =
             |> Map.ofSeq
             |> fun x -> x.TryFind >> Option.defaultValue []
         return facets, searchResult.Results |> Seq.toArray |> Array.map(fun r -> r.Document), searchResult.Count |> Option.ofNullable |> Option.map int }
-
 let insertProperties config tryGetGeo (properties:PropertyResult seq) =
     let index = propertiesIndex config
     properties
@@ -90,6 +90,7 @@ let insertProperties config tryGetGeo (properties:PropertyResult seq) =
           Town = r.Address.TownCity
           District = r.Address.District
           County = r.Address.County
+          PriceRange = calculatePriceRange r.Price
           Geo = r.Address.PostCode |> Option.bind tryGetGeo |> Option.map(fun (lat, long) -> GeographyPoint.Create(lat, long)) |> Option.toObj })
     |> IndexBatch.Upload
     |> index.Documents.IndexAsync
@@ -112,8 +113,7 @@ let private toFindPropertiesResponse findFacet count page results =
                    County = result.County
                    PostCode = result.PostCode |> Option.ofObj }
                Price = result.Price
-               DateOfTransfer = result.DateOfTransfer
-               PriceRange = PriceRange.ofPrice result.Price })
+               DateOfTransfer = result.DateOfTransfer })
       TotalTransactions = count
       Facets = 
         { Towns = findFacet "TownCity"
@@ -127,7 +127,8 @@ let applyFilters (filter:PropertyFilter) parameters =
     [ "TownCity", filter.Town
       "County", filter.County
       "Locality", filter.Locality
-      "District", filter.District ]
+      "District", filter.District
+      "PriceRange", filter.PriceRange ]
     |> List.fold withFilter parameters
 
 let findGeneric config request = task {
